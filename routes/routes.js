@@ -1,22 +1,18 @@
 import express from "express"
 import dotenv from "dotenv"
 import Student from "../model/model.js"
-import cloudinary from "../config/cloudinary.js"
+// import cloudinary from "../config/cloudinary.js"
 import upload from "../middlewares/multer.js"
 import { sendSubmissionEmail } from "../utils/mailer.js"
 import { v4 as uuidv4 } from "uuid"
+import imagekit from "../config/imagekit.js";
 
 const router = express.Router()
 dotenv.config({
   path: ".env"
 })
 
-// Express server status
-router.get("/", (req, res) => {
-  res.status(200).json({
-    "message": "Express server is running."
-  })
-})
+
 
 // Fetch student by its id registered in the MongoDB database
 router.get("/student/:id", async (req, res) => {
@@ -43,101 +39,196 @@ router.get("/students", async (req, res) => {
   }
 });
 
+// Just insert into db without email send and imagekit file upload designing best system architecture
 
-// Register student
-router.post("/register/student", upload.single("resume"), async (req, res) => {
+router.post("/register/student", async (req, res) => {
   try {
-    // 🔹 Normalize email
-    const email = req.body.email?.toLowerCase().trim();
-
-    // 🔹 Check if email already exists
-    const existingStudent = await Student.findOne({ email });
-    if (existingStudent) {
-      return res.status(409).json({
-        error: "Email is already registered",
-      });
-    }
-
-    // 🔹 Upload resume (optional)
-    let resumeURL = null;
-    let resumePublicId = null;
-
-    if (req.file) {
-      if (req.file.size > 3 * 1024 * 1024) {
-        return res.status(400).json({
-          error: "Resume size must be less than 3 MB",
-        });
-      }
-
-      resumePublicId = uuidv4();
-      const fileExtension = req.file.originalname.split(".").pop();
-      const fullPublicId = `${resumePublicId}.${fileExtension}`;
-
-      const uploadResult = await new Promise((resolve, reject) => {
-        cloudinary.uploader
-          .upload_stream(
-            {
-              folder: "cloudkrishna/student_resumes/" + email,
-              public_id: fullPublicId,
-              resource_type: "auto",
-              overwrite: true,
-            },
-            (err, result) => {
-              if (err) reject(err);
-              else resolve(result);
-            }
-          )
-          .end(req.file.buffer);
-      });
-
-      resumeURL = uploadResult.secure_url;
-      resumePublicId = fullPublicId;
-    }
-
-    // 🔹 Create student document
     const student = await Student.create({
       fullname: req.body.fullname,
-      email,
+      email: req.body.email,
       phone_number: req.body.phone_number,
       college: req.body.college,
       course: req.body.course,
       current_year: req.body.current_year,
       area_of_interest: req.body.area_of_interest,
-      resume_url: resumeURL,
-      resume_public_id: resumePublicId,
       status: "pending",
     });
 
-    // Send email (awaited to ensure execution, but caught so registration doesn't fail)
-    try {
-      await sendSubmissionEmail(
-        student.email,
-        student.fullname,
-        student._id.toString()
-      );
-    } catch (emailError) {
-      console.error("Failed to send registration email:", emailError.message);
-      // We don't throw properly here because we still want the registration to succeed
-      // but we log specifically that the email failed.
-    }
-
     return res.status(201).json({
+      success: true,
       message: "Student registered successfully",
-      id: student._id,
-      resume: resumeURL,
+      data: student,
     });
 
+  } catch (error) {
+    // Duplicate email
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Email already exists",
+      });
+    }
+
+    console.error("Register error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+});
+
+
+
+router.patch("/student/:id/resume", async (req, res) => {
+  const studentId = req.params.id;
+  const { resume_url, resume_public_id } = req.body;
+
+  if (!resume_url || !resume_public_id) {
+    return res.status(400).json({
+      success: false,
+      message: "Both resume_url and resume_public_id are required"
+    });
+  }
+
+  try {
+    const student = await Student.findByIdAndUpdate(
+      studentId,
+      { resume_url, resume_public_id },
+      // { new: true } // return the updated document
+    );
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student not found"
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Resume info updated successfully",
+      // data: {
+      //   _id: student._id,
+      //   resume_url: student.resume_url,
+      //   resume_public_id: student.resume_public_id
+      // }
+    });
+  } catch (error) {
+    console.error("Resume update error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
+
+
+router.get("/imagekit/auth", (req, res) => {
+  try {
+    const authenticationParameters = imagekit.getAuthenticationParameters();
+    // returns token, expire timestamp, signature
+    return res.status(200).json(authenticationParameters);
+  } catch (err) {
+    console.error("ImageKit auth error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate ImageKit auth" });
+  }
+});
+
+
+router.delete("/student/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find student
+    const student = await Student.findById(id);
+
+    if (!student) {
+      return res.status(404).json({
+        error: "Student not found",
+      });
+    }
+
+    // Delete resume from ImageKit (if exists)
+    if (student.resume_public_id) {
+      try {
+        await imagekit.deleteFile(student.resume_public_id);
+      } catch (err) {
+        console.error("ImageKit delete failed:", err.message);
+        // Continue deletion even if ImageKit fails
+      }
+    }
+
+    // Delete student from MongoDB
+    await Student.findByIdAndDelete(id);
+
+    return res.status(200).json({
+      message: "Student and resume deleted successfully",
+    });
 
   } catch (error) {
     console.error(error);
     return res.status(500).json({
-      error: "Failed to register student",
+      error: "Failed to delete student",
     });
   }
-
 });
 
 
+router.put("/edit/student/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Trim & normalize inputs
+    const updatedData = {
+      fullname: req.body.fullname?.trim(),
+      email: req.body.email?.toLowerCase().trim(),
+      phone_number: req.body.phone_number?.trim(),
+      college: req.body.college?.trim(),
+      course: req.body.course,
+      current_year: req.body.current_year,
+      area_of_interest: req.body.area_of_interest,
+      status:req.body.status,
+    };
+
+    // Check if student exists
+    const student = await Student.findById(id);
+    if (!student) {
+      return res.status(404).json({
+        error: "Student not found",
+      });
+    }
+
+    // Prevent duplicate email (except self)
+    if (updatedData.email && updatedData.email !== student.email) {
+      const emailExists = await Student.findOne({
+        email: updatedData.email,
+        _id: { $ne: id },
+      });
+
+      if (emailExists) {
+        return res.status(409).json({
+          error: "Email is already registered",
+        });
+      }
+    }
+
+    // Update student
+    await Student.findByIdAndUpdate(id, updatedData, {
+      new: true,
+      runValidators: true,
+    });
+
+    return res.status(200).json({
+      message: "Student updated successfully",
+    });
+
+  } catch (error) {
+    console.error("Edit student error:", error);
+    return res.status(500).json({
+      error: "Failed to update student",
+    });
+  }
+});
 
 
 

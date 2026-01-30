@@ -56,7 +56,7 @@ const studentRegistrationSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-    
+
     resume_public_id: {
       type: String,
       default: null,
@@ -68,6 +68,7 @@ const studentRegistrationSchema = new mongoose.Schema(
   }
 );
 
-const Student = mongoose.models.student ||  mongoose.model("Student", studentRegistrationSchema);
+// studentRegistrationSchema.index({ email: 1 }, { unique: true });
+const Student = mongoose.models.student || mongoose.model("Student", studentRegistrationSchema);
 
 export default Student

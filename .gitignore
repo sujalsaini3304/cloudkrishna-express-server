@@ -8,6 +8,7 @@ pnpm-debug.log*
 # Logs
 logs/
 *.log
+do.txt
 
 # Runtime data
 pids/

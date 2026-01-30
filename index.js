@@ -12,7 +12,15 @@ dotenv.config({
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use("/", router);
+
+// Express server status
+app.get("/", (req, res) => {
+  res.status(200).json({
+    "message": "Express server is running."
+  })
+})
+
+app.use("/api", router);
 
 const startServer = async () => {
   try {
