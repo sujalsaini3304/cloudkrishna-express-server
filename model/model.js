@@ -68,7 +68,49 @@ const studentRegistrationSchema = new mongoose.Schema(
   }
 );
 
+
+const adminRegistrationSchema = new mongoose.Schema({
+  fullname: {
+    type: String,
+    required: true,
+    trim: true,
+    minlength: 3,
+  },
+
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true,
+    match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+  },
+
+  password: {
+    type: String,
+    required: true,
+    trim: true,
+    minlength: 6,
+  },
+
+  role:{
+    type: String,
+    default:"admin"
+  }
+
+},
+  {
+    timestamps: true,
+    collection: "admin",
+  }
+)
+
+
 // studentRegistrationSchema.index({ email: 1 }, { unique: true });
 const Student = mongoose.models.student || mongoose.model("Student", studentRegistrationSchema);
+const Admin = mongoose.models.admin || mongoose.model("Admin", adminRegistrationSchema);
 
 export default Student
+export{
+  Admin ,
+}

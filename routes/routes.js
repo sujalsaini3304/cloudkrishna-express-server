@@ -1,18 +1,16 @@
 import express from "express"
 import dotenv from "dotenv"
 import Student from "../model/model.js"
-// import cloudinary from "../config/cloudinary.js"
-import upload from "../middlewares/multer.js"
-import { sendSubmissionEmail } from "../utils/mailer.js"
-import { v4 as uuidv4 } from "uuid"
 import imagekit from "../config/imagekit.js";
+import { Admin } from "../model/model.js"
+import jwt from "jsonwebtoken"
+import bcrypt from "bcryptjs"
+import verifyAdminToken from "../middlewares/jwt.middleware.js"
 
 const router = express.Router()
 dotenv.config({
   path: ".env"
 })
-
-
 
 // Fetch student by its id registered in the MongoDB database
 router.get("/student/:id", async (req, res) => {
@@ -40,7 +38,6 @@ router.get("/students", async (req, res) => {
 });
 
 // Just insert into db without email send and imagekit file upload designing best system architecture
-
 router.post("/register/student", async (req, res) => {
   try {
     const student = await Student.create({
@@ -135,7 +132,7 @@ router.get("/imagekit/auth", (req, res) => {
 });
 
 
-router.delete("/student/:id", async (req, res) => {
+router.delete("/student/:id", verifyAdminToken , async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -174,7 +171,7 @@ router.delete("/student/:id", async (req, res) => {
 });
 
 
-router.put("/edit/student/:id", async (req, res) => {
+router.put("/edit/student/:id", verifyAdminToken, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -231,7 +228,131 @@ router.put("/edit/student/:id", async (req, res) => {
 });
 
 
+router.post("/admin/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Basic validation
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required"
+      });
+    }
+
+    // Find admin by email
+    const admin = await Admin.findOne({ email: email.toLowerCase() });
+
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password"
+      });
+    }
+
+    // Compare password
+    const isPasswordMatch = await bcrypt.compare(password, admin.password);
+
+    if (!isPasswordMatch) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password"
+      });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      {
+        id: admin._id,
+        fullname: admin.fullname,
+        email: admin.email,
+        role: admin.role
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
+
+    // Success response
+    return res.status(200).json({
+      success: true,
+      message: "Admin login successful",
+      token,
+      admin: {
+        id: admin._id,
+        fullname: admin.fullname,
+        email: admin.email
+      }
+    });
+
+  } catch (error) {
+    console.error("Admin login error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
 
 
+router.post("/admin/register", async (req, res) => {
+  try {
+    const { fullname, email, password } = req.body;
+
+    // Validate input
+    if (!fullname || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required"
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters"
+      });
+    }
+
+    // Check if admin already exists
+    const existingAdmin = await Admin.findOne({ email: email.toLowerCase() });
+
+    if (existingAdmin) {
+      return res.status(409).json({
+        success: false,
+        message: "Admin already exists with this email"
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create admin
+    const admin = await Admin.create({
+      fullname: fullname.trim(),
+      email: email.toLowerCase(),
+      password: hashedPassword
+    });
+
+    // Success response (never return password)
+    return res.status(201).json({
+      success: true,
+      message: "Admin registered successfully",
+      admin: {
+        id: admin._id,
+        fullname: admin.fullname,
+        email: admin.email,
+        createdAt: admin.createdAt
+      }
+    });
+
+  } catch (error) {
+    console.error("Admin registration error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
 
 export default router
