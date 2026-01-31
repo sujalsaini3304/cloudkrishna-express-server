@@ -6,6 +6,7 @@ import { Admin } from "../model/model.js"
 import jwt from "jsonwebtoken"
 import bcrypt from "bcryptjs"
 import verifyAdminToken from "../middlewares/jwt.middleware.js"
+import { decrypt, encrypt } from "../utils/crypto.js";
 
 const router = express.Router()
 dotenv.config({
@@ -13,12 +14,22 @@ dotenv.config({
 })
 
 // Fetch student by its id registered in the MongoDB database
-router.get("/student/:id", async (req, res) => {
+router.get("/student/:id", verifyAdminToken , async (req, res) => {
   try {
-    const student = await Student.findById(req.params.id);
+    const student = await Student.findById(req.params.id).lean();
 
     if (!student) {
       return res.status(404).json({ error: "Student not found" });
+    }
+
+    // Decrypt resume_url if exists
+    if (student.resume_url) {
+      try {
+        student.resume_url = decrypt(student.resume_url);
+      } catch (err) {
+        console.error("Resume decrypt failed:", err);
+        student.resume_url = null;
+      }
     }
 
     res.status(200).json(student);
@@ -27,15 +38,32 @@ router.get("/student/:id", async (req, res) => {
   }
 });
 
+
 // Fetch all students
-router.get("/students", async (req, res) => {
+router.get("/students", verifyAdminToken ,   async (req, res) => {
   try {
-    const students = await Student.find().sort({ createdAt: -1 });
-    res.status(200).json(students);
+    const students = await Student.find()
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const decryptedStudents = students.map((student) => {
+      if (student.resume_url) {
+        try {
+          student.resume_url = decrypt(student.resume_url);
+        } catch (err) {
+          console.error("Resume decrypt failed:", err);
+          student.resume_url = null;
+        }
+      }
+      return student;
+    });
+
+    res.status(200).json(decryptedStudents);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch students" });
   }
 });
+
 
 // Just insert into db without email send and imagekit file upload designing best system architecture
 router.post("/register/student", async (req, res) => {
@@ -75,7 +103,6 @@ router.post("/register/student", async (req, res) => {
 });
 
 
-
 router.patch("/student/:id/resume", async (req, res) => {
   const studentId = req.params.id;
   const { resume_url, resume_public_id } = req.body;
@@ -83,38 +110,38 @@ router.patch("/student/:id/resume", async (req, res) => {
   if (!resume_url || !resume_public_id) {
     return res.status(400).json({
       success: false,
-      message: "Both resume_url and resume_public_id are required"
+      message: "Both resume_url and resume_public_id are required",
     });
   }
 
   try {
+    // Encrypt resume URL
+    const encryptedResumeUrl = encrypt(resume_url);
+
     const student = await Student.findByIdAndUpdate(
       studentId,
-      { resume_url, resume_public_id },
-      // { new: true } // return the updated document
+      {
+        resume_url: encryptedResumeUrl,
+        resume_public_id,
+      }
     );
 
     if (!student) {
       return res.status(404).json({
         success: false,
-        message: "Student not found"
+        message: "Student not found",
       });
     }
 
     return res.status(200).json({
       success: true,
-      message: "Resume info updated successfully",
-      // data: {
-      //   _id: student._id,
-      //   resume_url: student.resume_url,
-      //   resume_public_id: student.resume_public_id
-      // }
+      message: "Resume info updated securely",
     });
   } catch (error) {
     console.error("Resume update error:", error);
     return res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: "Internal server error",
     });
   }
 });
@@ -228,6 +255,50 @@ router.put("/edit/student/:id", verifyAdminToken, async (req, res) => {
 });
 
 
+// Fetch current admin profile (protected)
+router.get("/fetch/admin", async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.admin?.id).select("-password");
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found"
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      admin
+    });
+  } catch (error) {
+    console.error("Fetch admin error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
+
+// Fetch all admins (protected)
+router.get("/fetch/admins", async (req, res) => {
+  try {
+    const admins = await Admin.find().select("-password").sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      data: admins
+    });
+  } catch (error) {
+    console.error("Fetch admins error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
+
+
 router.post("/admin/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -266,10 +337,11 @@ router.post("/admin/login", async (req, res) => {
         id: admin._id,
         fullname: admin.fullname,
         email: admin.email,
-        role: admin.role
+        role: admin.role,
+        status:admin.status
       },
       process.env.JWT_SECRET,
-      { expiresIn: "1d" }
+      { expiresIn: "1h" }
     );
 
     // Success response
@@ -294,12 +366,18 @@ router.post("/admin/login", async (req, res) => {
 });
 
 
+
+
+
+
+
+
 router.post("/admin/register", async (req, res) => {
   try {
-    const { fullname, email, password } = req.body;
+    const { fullname, email, password , phone_number } = req.body;
 
     // Validate input
-    if (!fullname || !email || !password) {
+    if (!fullname || !email || !password || !phone_number) {
       return res.status(400).json({
         success: false,
         message: "All fields are required"
@@ -310,6 +388,13 @@ router.post("/admin/register", async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Password must be at least 6 characters"
+      });
+    }
+
+    if (!(phone_number.length ==  10 )  ) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number must be at least 10 characters"
       });
     }
 
@@ -330,7 +415,8 @@ router.post("/admin/register", async (req, res) => {
     const admin = await Admin.create({
       fullname: fullname.trim(),
       email: email.toLowerCase(),
-      password: hashedPassword
+      password: hashedPassword,
+      phone_number: phone_number
     });
 
     // Success response (never return password)
@@ -354,5 +440,115 @@ router.post("/admin/register", async (req, res) => {
     });
   }
 });
+
+
+
+
+// Edit admin (protected)
+router.put("/admin/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Trim & normalize inputs
+    const updatedData = {
+      fullname: req.body.fullname?.trim(),
+      email: req.body.email?.toLowerCase().trim(),
+      phone_number: req.body.phone_number?.trim(),
+      status: req.body.status,
+    };
+
+    // Check if admin exists
+    const admin = await Admin.findById(id);
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found"
+      });
+    }
+
+    // Prevent duplicate email (except self)
+    if (updatedData.email && updatedData.email !== admin.email) {
+      const emailExists = await Admin.findOne({
+        email: updatedData.email,
+        _id: { $ne: id },
+      });
+
+      if (emailExists) {
+        return res.status(409).json({
+          success: false,
+          message: "Email is already registered"
+        });
+      }
+    }
+
+    // Handle password update if provided
+    if (req.body.password) {
+      if (req.body.password.length < 6) {
+        return res.status(400).json({
+          success: false,
+          message: "Password must be at least 6 characters"
+        });
+      }
+      updatedData.password = await bcrypt.hash(req.body.password, 10);
+    }
+
+    // Update admin
+    await Admin.findByIdAndUpdate(id, updatedData, {
+      new: true,
+      runValidators: true,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Admin updated successfully"
+    });
+
+  } catch (error) {
+    console.error("Edit admin error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
+
+// Delete admin (protected)
+router.delete("/admin/:id" , async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find admin
+    const admin = await Admin.findById(id);
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found"
+      });
+    }
+
+    // Delete admin from MongoDB
+    await Admin.findByIdAndDelete(id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Admin deleted successfully"
+    });
+
+  } catch (error) {
+    console.error("Delete admin error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
+
+
+
+
+
+
+
 
 export default router

@@ -13,7 +13,7 @@ const verifyAdminToken = (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    if (decoded.role !== "admin") {
+    if (decoded.role !== "admin" && decoded.status == "active") {
       return res.status(403).json({
         success: false,
         message: "Access denied. Admin role required"

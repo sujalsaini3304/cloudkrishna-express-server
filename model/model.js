@@ -93,10 +93,22 @@ const adminRegistrationSchema = new mongoose.Schema({
     minlength: 6,
   },
 
-  role:{
+  role: {
     type: String,
-    default:"admin"
-  }
+    default: "admin"
+  },
+
+  status: {
+    type: String,
+    enum: ["active", "inactive"],
+    default: "active",
+  },
+
+  phone_number: {
+    type: String,
+    required: true,
+    minlength:10,
+  },
 
 },
   {
@@ -111,6 +123,6 @@ const Student = mongoose.models.student || mongoose.model("Student", studentRegi
 const Admin = mongoose.models.admin || mongoose.model("Admin", adminRegistrationSchema);
 
 export default Student
-export{
-  Admin ,
+export {
+  Admin,
 }
