@@ -37,12 +37,16 @@ const studentRegistrationSchema = new mongoose.Schema(
     current_year: {
       type: String,
       required: true,
-      enum: ["1st Year", "2nd Year", "3rd Year", "4th Year", "Graduated"],
+      enum: ["1st Year", "2nd Year", "3rd Year", "4th Year", "Graduated" , "Other"],
     },
 
     area_of_interest: {
-      type: String,
+      type: [String],
       required: true,
+      validate: {
+        validator: (value) => Array.isArray(value) && value.length > 0,
+        message: "area_of_interest must be a non-empty array of strings",
+      },
     },
 
     status: {
