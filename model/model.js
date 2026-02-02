@@ -37,7 +37,7 @@ const studentRegistrationSchema = new mongoose.Schema(
     current_year: {
       type: String,
       required: true,
-      enum: ["1st Year", "2nd Year", "3rd Year", "4th Year", "Graduated" , "Other"],
+      enum: ["1st Year", "2nd Year", "3rd Year", "4th Year", "Graduated", "Other"],
     },
 
     area_of_interest: {
@@ -111,7 +111,7 @@ const adminRegistrationSchema = new mongoose.Schema({
   phone_number: {
     type: String,
     required: true,
-    minlength:10,
+    minlength: 10,
   },
 
 },
@@ -121,12 +121,34 @@ const adminRegistrationSchema = new mongoose.Schema({
   }
 )
 
+// FormField Schema - stores arrays of form field options
+const formFieldSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      required: true,
+      unique: true,
+      enum: ['colleges', 'courses', 'years', 'interests', 'countryCodes'],
+    },
+    values: {
+      type: [String],
+      default: [],
+    },
+  },
+  {
+    timestamps: true,
+    collection: "formfields",
+  }
+);
+
 
 // studentRegistrationSchema.index({ email: 1 }, { unique: true });
 const Student = mongoose.models.student || mongoose.model("Student", studentRegistrationSchema);
 const Admin = mongoose.models.admin || mongoose.model("Admin", adminRegistrationSchema);
+const FormField = mongoose.models.formfield || mongoose.model("FormField", formFieldSchema);
 
 export default Student
 export {
   Admin,
+  FormField,
 }

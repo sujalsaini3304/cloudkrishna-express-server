@@ -2,7 +2,7 @@ import express from "express"
 import dotenv from "dotenv"
 import Student from "../model/model.js"
 import imagekit from "../config/imagekit.js";
-import { Admin } from "../model/model.js"
+import { Admin, FormField } from "../model/model.js"
 import jwt from "jsonwebtoken"
 import bcrypt from "bcryptjs"
 import verifyAdminToken from "../middlewares/jwt.middleware.js"
@@ -13,8 +13,9 @@ dotenv.config({
   path: ".env"
 })
 
+
 // Fetch student by its id registered in the MongoDB database
-router.get("/student/:id", verifyAdminToken , async (req, res) => {
+router.get("/student/:id", verifyAdminToken, async (req, res) => {
   try {
     const student = await Student.findById(req.params.id).lean();
 
@@ -39,12 +40,43 @@ router.get("/student/:id", verifyAdminToken , async (req, res) => {
 });
 
 
-// Fetch all students
-router.get("/students", verifyAdminToken ,   async (req, res) => {
+// Fetch all students with pagination and search
+router.get("/students", verifyAdminToken, async (req, res) => {
   try {
-    const students = await Student.find()
-      .sort({ createdAt: -1 })
-      .lean();
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const search = req.query.search || '';
+    const status = req.query.status || 'all';
+
+    const query = {};
+
+    // Search logic
+    if (search) {
+      const searchRegex = new RegExp(search, 'i');
+      query.$or = [
+        { fullname: searchRegex },
+        { email: searchRegex },
+        { college: searchRegex },
+        { phone_number: searchRegex }
+      ];
+    }
+
+    // Status filter
+    if (status !== 'all') {
+      query.status = status;
+    }
+
+    const skip = (page - 1) * limit;
+
+    // Parallel execution for count and fetch
+    const [total, students] = await Promise.all([
+      Student.countDocuments(query),
+      Student.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean()
+    ]);
 
     const decryptedStudents = students.map((student) => {
       if (student.resume_url) {
@@ -58,9 +90,23 @@ router.get("/students", verifyAdminToken ,   async (req, res) => {
       return student;
     });
 
-    res.status(200).json(decryptedStudents);
+    res.status(200).json({
+      success: true,
+      data: decryptedStudents,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
   } catch (error) {
-    res.status(500).json({ error: "Failed to fetch students" });
+    console.error("Fetch students error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch students",
+      error: error.message
+    });
   }
 });
 
@@ -159,7 +205,7 @@ router.get("/imagekit/auth", (req, res) => {
 });
 
 
-router.delete("/student/:id", verifyAdminToken , async (req, res) => {
+router.delete("/student/:id", verifyAdminToken, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -211,7 +257,7 @@ router.put("/edit/student/:id", verifyAdminToken, async (req, res) => {
       course: req.body.course,
       current_year: req.body.current_year,
       area_of_interest: req.body.area_of_interest,
-      status:req.body.status,
+      status: req.body.status,
     };
 
     // Check if student exists
@@ -338,7 +384,7 @@ router.post("/admin/login", async (req, res) => {
         fullname: admin.fullname,
         email: admin.email,
         role: admin.role,
-        status:admin.status
+        status: admin.status
       },
       process.env.JWT_SECRET,
       { expiresIn: "1h" }
@@ -374,7 +420,7 @@ router.post("/admin/login", async (req, res) => {
 
 router.post("/admin/register", async (req, res) => {
   try {
-    const { fullname, email, password , phone_number } = req.body;
+    const { fullname, email, password, phone_number } = req.body;
 
     // Validate input
     if (!fullname || !email || !password || !phone_number) {
@@ -391,7 +437,7 @@ router.post("/admin/register", async (req, res) => {
       });
     }
 
-    if (!(phone_number.length ==  10 )  ) {
+    if (!(phone_number.length == 10)) {
       return res.status(400).json({
         success: false,
         message: "Phone number must be at least 10 characters"
@@ -513,7 +559,7 @@ router.put("/admin/:id", async (req, res) => {
 });
 
 // Delete admin (protected)
-router.delete("/admin/:id" , async (req, res) => {
+router.delete("/admin/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -544,10 +590,271 @@ router.delete("/admin/:id" , async (req, res) => {
   }
 });
 
+// ==================== PUBLIC FORM FIELDS ROUTE (NO AUTH) ====================
+
+// Get all form fields for registration form (public endpoint)
+router.get("/form-fields/public/all", async (req, res) => {
+  try {
+    // Fetch all form field types
+    const formFields = await FormField.find({});
+
+    // Create response object with all types
+    const response = {
+      colleges: [],
+      courses: [],
+      years: [],
+      interests: [],
+      countryCodes: []
+    };
+
+    // Map database types to response keys
+    formFields.forEach(field => {
+      if (field.type === 'colleges') {
+        response.colleges = field.values || [];
+      } else if (field.type === 'courses') {
+        response.courses = field.values || [];
+      } else if (field.type === 'years') {
+        response.years = field.values || [];
+      } else if (field.type === 'interests') {
+        response.interests = field.values || [];
+      } else if (field.type === 'countryCodes') {
+        response.countryCodes = field.values || [];
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: response
+    });
+
+  } catch (error) {
+    console.error("Get public form fields error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
 
 
+// ==================== FORM FIELD MANAGEMENT ROUTES ====================
 
+// Get all form fields for a specific type
+router.get("/form-fields/:type", verifyAdminToken, async (req, res) => {
+  try {
+    const { type } = req.params;
 
+    // Validate type
+    const validTypes = ['colleges', 'courses', 'years', 'interests', 'countryCodes'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid type. Must be one of: colleges, courses, years, interests, countryCodes"
+      });
+    }
+
+    // Find or create the form field document
+    let formField = await FormField.findOne({ type });
+
+    if (!formField) {
+      // Create with empty array if doesn't exist
+      formField = await FormField.create({ type, values: [] });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: formField.values
+    });
+
+  } catch (error) {
+    console.error("Get form fields error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
+
+// Add a new value to form field
+router.post("/form-fields/:type", verifyAdminToken, async (req, res) => {
+  try {
+    const { type } = req.params;
+    const { value } = req.body;
+
+    // Validate type
+    const validTypes = ['colleges', 'courses', 'years', 'interests', 'countryCodes'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid type. Must be one of: colleges, courses, years, interests"
+      });
+    }
+
+    // Validate value
+    if (!value || typeof value !== 'string' || !value.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Value is required and must be a non-empty string"
+      });
+    }
+
+    // Find or create the form field document
+    let formField = await FormField.findOne({ type });
+
+    if (!formField) {
+      formField = await FormField.create({ type, values: [value.trim()] });
+    } else {
+      // Check for duplicates
+      if (formField.values.includes(value.trim())) {
+        return res.status(409).json({
+          success: false,
+          message: "This value already exists"
+        });
+      }
+
+      // Add new value
+      formField.values.push(value.trim());
+      await formField.save();
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Value added successfully",
+      data: formField.values
+    });
+
+  } catch (error) {
+    console.error("Add form field error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
+
+// Update a value in form field
+router.put("/form-fields/:type/:index", verifyAdminToken, async (req, res) => {
+  try {
+    const { type, index } = req.params;
+    const { value } = req.body;
+
+    // Validate type
+    const validTypes = ['colleges', 'courses', 'years', 'interests', 'countryCodes'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid type. Must be one of: colleges, courses, years, interests, countryCodes"
+      });
+    }
+
+    // Validate value
+    if (!value || typeof value !== 'string' || !value.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Value is required and must be a non-empty string"
+      });
+    }
+
+    // Find the form field document
+    const formField = await FormField.findOne({ type });
+
+    if (!formField) {
+      return res.status(404).json({
+        success: false,
+        message: "Form field not found"
+      });
+    }
+
+    // Validate index
+    const idx = parseInt(index);
+    if (isNaN(idx) || idx < 0 || idx >= formField.values.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid index"
+      });
+    }
+
+    // Check for duplicates (excluding current index)
+    const trimmedValue = value.trim();
+    const duplicateIndex = formField.values.findIndex((v, i) => v === trimmedValue && i !== idx);
+    if (duplicateIndex !== -1) {
+      return res.status(409).json({
+        success: false,
+        message: "This value already exists"
+      });
+    }
+
+    // Update value
+    formField.values[idx] = trimmedValue;
+    await formField.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Value updated successfully",
+      data: formField.values
+    });
+
+  } catch (error) {
+    console.error("Update form field error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
+
+// Delete a value from form field
+router.delete("/form-fields/:type/:index", verifyAdminToken, async (req, res) => {
+  try {
+    const { type, index } = req.params;
+
+    // Validate type
+    const validTypes = ['colleges', 'courses', 'years', 'interests', 'countryCodes'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid type. Must be one of: colleges, courses, years, interests, countryCodes"
+      });
+    }
+
+    // Find the form field document
+    const formField = await FormField.findOne({ type });
+
+    if (!formField) {
+      return res.status(404).json({
+        success: false,
+        message: "Form field not found"
+      });
+    }
+
+    // Validate index
+    const idx = parseInt(index);
+    if (isNaN(idx) || idx < 0 || idx >= formField.values.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid index"
+      });
+    }
+
+    // Remove value
+    const deletedValue = formField.values[idx];
+    formField.values.splice(idx, 1);
+    await formField.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `"${deletedValue}" deleted successfully`,
+      data: formField.values
+    });
+
+  } catch (error) {
+    console.error("Delete form field error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
 
 
 
