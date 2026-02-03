@@ -2,11 +2,14 @@ import express from "express"
 import dotenv from "dotenv"
 import Student from "../model/model.js"
 import imagekit from "../config/imagekit.js";
-import { Admin, FormField } from "../model/model.js"
+import { Admin, FormField, AuthCode } from "../model/model.js"
 import jwt from "jsonwebtoken"
 import bcrypt from "bcryptjs"
 import verifyAdminToken from "../middlewares/jwt.middleware.js"
+import {verifySuperAdminToken} from "../middlewares/jwt.middleware.js"
 import { decrypt, encrypt } from "../utils/crypto.js";
+import { sendVerificationCodeEmail } from "../utils/mailer.js";
+
 
 const router = express.Router()
 dotenv.config({
@@ -302,7 +305,7 @@ router.put("/edit/student/:id", verifyAdminToken, async (req, res) => {
 
 
 // Fetch current admin profile (protected)
-router.get("/fetch/admin", async (req, res) => {
+router.get("/fetch/admin", verifySuperAdminToken ,  async (req, res) => {
   try {
     const admin = await Admin.findById(req.admin?.id).select("-password");
 
@@ -327,7 +330,7 @@ router.get("/fetch/admin", async (req, res) => {
 });
 
 // Fetch all admins (protected)
-router.get("/fetch/admins", async (req, res) => {
+router.get("/fetch/admins", verifySuperAdminToken ,  async (req, res) => {
   try {
     const admins = await Admin.find().select("-password").sort({ createdAt: -1 });
 
@@ -377,6 +380,13 @@ router.post("/admin/login", async (req, res) => {
       });
     }
 
+    if(admin.status == "inactive"){
+       return res.status(403).json({
+        success: false,
+        message: "Access Denied"
+      });
+    }
+
     // Generate JWT token
     const token = jwt.sign(
       {
@@ -418,7 +428,7 @@ router.post("/admin/login", async (req, res) => {
 
 
 
-router.post("/admin/register", async (req, res) => {
+router.post("/admin/register", verifySuperAdminToken ,  async (req, res) => {
   try {
     const { fullname, email, password, phone_number } = req.body;
 
@@ -491,7 +501,7 @@ router.post("/admin/register", async (req, res) => {
 
 
 // Edit admin (protected)
-router.put("/admin/:id", async (req, res) => {
+router.put("/admin/:id", verifySuperAdminToken , async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -559,7 +569,7 @@ router.put("/admin/:id", async (req, res) => {
 });
 
 // Delete admin (protected)
-router.delete("/admin/:id", async (req, res) => {
+router.delete("/admin/:id", verifySuperAdminToken ,  async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -849,6 +859,112 @@ router.delete("/form-fields/:type/:index", verifyAdminToken, async (req, res) =>
 
   } catch (error) {
     console.error("Delete form field error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
+
+
+
+router.post("/super/admin/login" , async (req,res)=>{
+  const {email} = req.body;
+  if(email != process.env.SUPER_ADMIN_EMAIL){
+     return res.status(400).json({
+      success: false,
+      message: "Invalid email"
+    });
+  }
+
+  try {
+    // Generate 6-digit verification code
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Send verification code to super admin email
+    await sendVerificationCodeEmail(process.env.SUPER_ADMIN_EMAIL, verificationCode);
+
+    // Hash the code using bcrypt
+    const hashedCode = await bcrypt.hash(verificationCode, 10);
+
+    // Delete any previous codes for this email
+    await AuthCode.deleteMany({ email: process.env.SUPER_ADMIN_EMAIL });
+
+    // Save hashed code to database
+    await AuthCode.create({
+      email: process.env.SUPER_ADMIN_EMAIL,
+      code: hashedCode
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Verification code sent to super admin email"
+    });
+  } catch (error) {
+    console.error("Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send verification code"
+    });
+  }
+})
+
+
+
+router.post("/verify/super/admin", async (req, res) => {
+  try {
+    const { code } = req.body;
+    const email = process.env.SUPER_ADMIN_EMAIL;
+
+    // Validate code input
+    if (!code || code.toString().length !== 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid code format. Code must be 6 digits"
+      });
+    }
+
+    // Find the stored auth code
+    const authCode = await AuthCode.findOne({ email });
+
+    if (!authCode) {
+      return res.status(401).json({
+        success: false,
+        message: "No verification code found. Please request a new code"
+      });
+    }
+
+    // Compare the provided code with the hashed code
+    const isCodeValid = await bcrypt.compare(code.toString(), authCode.code);
+
+    if (!isCodeValid) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid verification code"
+      });
+    }
+
+    // Delete the used code
+    await AuthCode.deleteOne({ _id: authCode._id });
+
+    // Generate JWT token for super admin
+    const token = jwt.sign(
+      {
+        email: email,
+        role: "super-admin"
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Super admin verified successfully",
+      token
+    });
+
+  } catch (error) {
+    console.error("Verification error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error"

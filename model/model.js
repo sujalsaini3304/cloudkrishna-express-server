@@ -141,14 +141,40 @@ const formFieldSchema = new mongoose.Schema(
   }
 );
 
+// AuthCode Schema - stores hashed verification codes for super admin
+const authCodeSchema = new mongoose.Schema(
+  {
+    email: {
+      type: String,
+      required: true,
+      lowercase: true,
+      trim: true,
+    },
+    code: {
+      type: String,
+      required: true,
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+      expires: 900, // Auto-delete after 15 minutes (900 seconds)
+    },
+  },
+  {
+    collection: "authcode",
+  }
+);
+
 
 // studentRegistrationSchema.index({ email: 1 }, { unique: true });
 const Student = mongoose.models.student || mongoose.model("Student", studentRegistrationSchema);
 const Admin = mongoose.models.admin || mongoose.model("Admin", adminRegistrationSchema);
 const FormField = mongoose.models.formfield || mongoose.model("FormField", formFieldSchema);
+const AuthCode = mongoose.models.authcode || mongoose.model("AuthCode", authCodeSchema);
 
 export default Student
 export {
   Admin,
   FormField,
+  AuthCode,
 }

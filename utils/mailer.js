@@ -317,5 +317,184 @@ export const sendSubmissionEmail = async (to, fullName, applicationId) => {
 	}
 };
 
+export const sendVerificationCodeEmail = async (to, code) => {
+	try {
+		const resendClient = getResendClient();
+		const fromEmail = process.env.RESEND_FROM_EMAIL;
+
+		if (!fromEmail) {
+			throw new Error("RESEND_FROM_EMAIL is not set in environment variables");
+		}
+
+		const result = await resendClient.emails.send({
+			from: fromEmail,
+			to: to,
+			subject: "Super Admin Verification Code | Cloud Krishna",
+			html: `
+			<!DOCTYPE html>
+			<html lang="en">
+			<head>
+				<meta charset="UTF-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<title>Verification Code - Cloud Krishna</title>
+				<style>
+					body, table, td, div, p, a {
+						-webkit-text-size-adjust: 100%;
+						-ms-text-size-adjust: 100%;
+					}
+					table, td {
+						mso-table-lspace: 0pt;
+						mso-table-rspace: 0pt;
+					}
+					img {
+						-ms-interpolation-mode: bicubic;
+						border: 0;
+						height: auto;
+						line-height: 100%;
+						outline: none;
+						text-decoration: none;
+					}
+					body {
+						margin: 0 !important;
+						padding: 0 !important;
+						width: 100% !important;
+						height: 100% !important;
+					}
+					@media only screen and (max-width: 600px) {
+						.email-container {
+							width: 100% !important;
+						}
+						.mobile-padding {
+							padding: 30px 20px !important;
+						}
+						.mobile-text {
+							font-size: 15px !important;
+							line-height: 24px !important;
+						}
+					}
+				</style>
+			</head>
+			<body style="margin: 0; padding: 0; background-color: #ffffff; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;">
+				<table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #ffffff;">
+					<tr>
+						<td align="center" style="padding: 60px 20px;">
+							<table border="0" cellpadding="0" cellspacing="0" width="600" class="email-container" style="background-color: #ffffff;">
+								
+								<!-- Header -->
+								<tr>
+									<td style="padding: 0 0 50px 0;">
+										<table border="0" cellpadding="0" cellspacing="0" width="100%">
+											<tr>
+												<td style="background-color: #16a34a; padding: 45px 50px; text-align: left;">
+													<h2 style="margin: 0 0 8px 0; font-size: 13px; font-weight: 500; color: rgba(255, 255, 255, 0.9); letter-spacing: 3px; text-transform: uppercase;">
+														Cloud Krishna
+													</h2>
+													<h1 style="margin: 0; font-size: 32px; font-weight: 600; color: #ffffff; line-height: 40px;">
+														Verification Code
+													</h1>
+												</td>
+											</tr>
+										</table>
+									</td>
+								</tr>
+								
+								<!-- Main Content -->
+								<tr>
+									<td class="mobile-padding" style="padding: 0 50px 50px 50px;">
+										<table border="0" cellpadding="0" cellspacing="0" width="100%">
+											
+											<!-- Message -->
+											<tr>
+												<td style="padding-bottom: 35px;">
+													<p class="mobile-text" style="margin: 0 0 16px 0; font-size: 16px; line-height: 28px; color: #404040;">
+														Your super admin verification code is:
+													</p>
+												</td>
+											</tr>
+											
+											<!-- Code Box -->
+											<tr>
+												<td style="padding-bottom: 40px;">
+													<table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f0fdf4; padding: 30px; border: 2px solid #16a34a; border-radius: 8px; text-align: center;">
+														<tr>
+															<td>
+																<p style="margin: 0; font-size: 48px; font-weight: 700; color: #16a34a; letter-spacing: 8px; font-family: monospace;">
+																	${code}
+																</p>
+																<p style="margin: 16px 0 0 0; font-size: 12px; color: #666666;">
+																	This code expires in 15 minutes
+																</p>
+															</td>
+														</tr>
+													</table>
+												</td>
+											</tr>
+											
+											<!-- Warning -->
+											<tr>
+												<td style="padding-bottom: 40px;">
+													<div style="background-color: #fef3c7; padding: 16px; border-left: 4px solid #f59e0b; border-radius: 4px;">
+														<p style="margin: 0; font-size: 14px; color: #92400e;">
+															<strong style="font-weight: 600;">Security Notice:</strong> Never share this code with anyone. Cloud Krishna team will never ask for this code.
+														</p>
+													</div>
+												</td>
+											</tr>
+											
+											<!-- Closing -->
+											<tr>
+												<td style="padding-top: 20px; border-top: 1px solid #e5e5e5;">
+													<p style="margin: 0 0 4px 0; font-size: 15px; color: #525252;">
+														Best regards,
+													</p>
+													<p style="margin: 0; font-size: 16px; font-weight: 600; color: #171717;">
+														Cloud Krishna Team
+													</p>
+												</td>
+											</tr>
+										</table>
+									</td>
+								</tr>
+								
+								<!-- Footer -->
+								<tr>
+									<td style="padding: 40px 50px; background-color: #fafafa;">
+										<table border="0" cellpadding="0" cellspacing="0" width="100%">
+											<tr>
+												<td>
+													<p style="margin: 0 0 8px 0; font-size: 13px; line-height: 20px; color: #737373;">
+														This is an automated message. Please do not reply.
+													</p>
+													<p style="margin: 0; font-size: 12px; color: #a3a3a3;">
+														© 2026 Cloud Krishna. All rights reserved.
+													</p>
+												</td>
+											</tr>
+										</table>
+									</td>
+								</tr>
+								
+							</table>
+						</td>
+					</tr>
+				</table>
+			</body>
+			</html>
+			`
+		});
+
+		if (result.error) {
+			console.error("Resend error response:", result.error);
+			throw new Error(`Resend error: ${JSON.stringify(result.error)}`);
+		}
+
+		console.log("Verification code email sent successfully. Message ID:", result.data?.id);
+		return result.data;
+	} catch (error) {
+		console.error("Email sending failed:", error.message);
+		throw error;
+	}
+};
+
 
 
